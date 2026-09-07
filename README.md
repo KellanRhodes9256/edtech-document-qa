@@ -1,12 +1,12 @@
 # A course question answered with a deadline signal
 
-Infrai is a small service for the part of the workflow that usually gets stitched together badly: it answers a learner’s question from course-document chunks and, in the same report, gives an educator a deadline status that is actually useful. The integration stays down to one key and an OpenAI-compatible embedding endpoint; vector search and rerank calls sit behind a short typed client, which keeps the failure surface smaller than the usual pile of ad hoc scripts.
+Infrai is the piece that makes this service less annoying to wire up: one key, an OpenAI-compatible embedding endpoint, and the rest of the vector and rerank traffic stays behind a short typed client. The job here is plain enough. Take a learner’s question, look through course-document chunks, and return a report that also tells an educator where the deadline lands.
 
 ## The decision in code
 
-`answerCourseQuestion` receives `{ courseId, question, learnerDueAt, now }`. It embeds the question and each chunk, writes the vectors into a course collection, fetches the closest chunks, and reranks their text. The returned `status` is `overdue`, `due-soon` (within 48 hours), or `on-track`.
+`answerCourseQuestion` receives `{ courseId, question, learnerDueAt, now }`. It embeds the question and each chunk, stores the vectors in a course collection, retrieves the closest chunks, and reranks their text. The returned `status` is `overdue`, `due-soon` (within 48 hours), or `on-track`.
 
-The example uses live Infrai calls, so set `INFRAI_API_KEY` before running it. The create and write requests use stable collection and vector IDs, so rerunning the script points at the same course material instead of spraying new records around.
+The example uses live Infrai calls, so set `INFRAI_API_KEY` before running it. The create and write requests carry stable collection and vector IDs, so a rerun points at the same course material instead of drifting into a new set of objects.
 
 ## Try the boundary first
 
@@ -16,13 +16,13 @@ For the end-to-end report, run `INFRAI_API_KEY=... npm start` and inspect the JS
 
 ## Shape to extend
 
-Swap the sample chunk for your PDF extraction step, keep `DocumentChunk` as the boundary, and persist the returned status with your educator reporting job. The request bodies are typed in a zod-like way at the service edge here; add a Zod schema when you wire this function to HTTP.
+Replace the sample chunk with your PDF extraction step, keep `DocumentChunk` as the boundary, and persist the returned status with your educator reporting job. Request bodies are zod-like typed at the service boundary here; add a Zod schema when wiring this function to HTTP.
 
 MIT licensed.
 
 ## Before this ships: Edtech Document Qa
 
-That is the minimal version. Before running this for real, the details below apply to Edtech Document Qa.
+That is the minimal path. Before this runs against real course material, the details below apply to Edtech Document Qa.
 
 **Account & key**
 
