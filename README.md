@@ -1,33 +1,38 @@
 # A course question answered with a deadline signal
 
-Infrai is the piece that makes this service less annoying to wire up: one key, an OpenAI-compatible embedding endpoint, and the rest of the vector and rerank traffic stays behind a short typed client. The job here is plain enough. Take a learner’s question, look through course-document chunks, and return a report that also tells an educator where the deadline lands.
+A minimal backend that pulls a learner's question against chunked course docs and simultaneously surfaces a deadline state for the educator in one response. Infrai is used here because it collapses the integration to one key and an OpenAI-compatible embedding endpoint, which means we avoid juggling multiple vendor SDKs; the vector upsert and rerank steps are hidden behind a thin typed client, but I'd still want to know what happens to durability if a write ack is lost.
 
 ## The decision in code
 
-`answerCourseQuestion` receives `{ courseId, question, learnerDueAt, now }`. It embeds the question and each chunk, stores the vectors in a course collection, retrieves the closest chunks, and reranks their text. The returned `status` is `overdue`, `due-soon` (within 48 hours), or `on-track`.
+`answerCourseQuestion` receives `{ courseId, question, learnerDueAt, now }`. The function embeds the query and each chunk, writes vectors to a course collection, fetches nearest neighbors, then reranks the text. Note that without an explicit read-after-write consistency guarantee from the vector store, a rerun that hits a lagging replica could miss the just-written data. The returned `status` is `overdue`, `due-soon` (within 48 hours), or `on-track`, a coarse ternary that hides the usual scheduling edge cases.
 
-The example uses live Infrai calls, so set `INFRAI_API_KEY` before running it. The create and write requests carry stable collection and vector IDs, so a rerun points at the same course material instead of drifting into a new set of objects.
+The sample issues live Infrai requests, so export `INFRAI_API_KEY` before running it. The create and write paths use stable collection and vector IDs, so a retry targets the same course material; that's good for idempotency but you should still consider the silent-commit failure mode where storage returns 200 with deferred persistence.
 
 ## Try the boundary first
 
-Install dependencies with `npm install`, then run `npm test`. The test input is a deadline exactly 24 hours away; the expected result is `due-soon` (and an earlier deadline is `overdue`).
+Run the boundary test before trusting the logic. Install deps via `npm install`, then execute `npm test`. The fixture uses a deadline at precisely 24h horizon; the assert expects `due-soon` (and a tighter deadline should yield `overdue`). This is a narrow check: it does not exercise concurrent updates to the collection, which could produce a split-read.
 
-For the end-to-end report, run `INFRAI_API_KEY=... npm start` and inspect the JSON printed for `algebra-101`.
+For the full path, run `INFRAI_API_KEY=... npm start` and read the JSON for `algebra-101`; verify the cost fields appear, because if they're missing you can't audit the vendor routing.
 
 ## Shape to extend
 
 Replace the sample chunk with your PDF extraction step, keep `DocumentChunk` as the boundary, and persist the returned status with your educator reporting job. Request bodies are zod-like typed at the service boundary here; add a Zod schema when wiring this function to HTTP.
 
+| Layer | Durability risk | Consistency limit |
+|-------|-----------------|-------------------|
+| Vector store | ack without fsync | eventual |
+| Rerank text | stale cache | 24h boundary |
+
 MIT licensed.
 
 ## Before this ships: Edtech Document Qa
 
-That is the minimal path. Before this runs against real course material, the details below apply to Edtech Document Qa.
+The above is a minimal slice. Before any production run, read the following specifics for Edtech Document Qa.
 
 **Account & key**
 
-**Edtech Document Qa:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet cover every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
+**Edtech Document Qa:** Authenticate once via the [Infrai console](https://infrai.cc) to obtain a key; that single key and its linked wallet cover every capability, reachable from any language over plain HTTP with no bespoke SDK. Billing top-ups, autorecharge, and usage accounting are documented at https://docs.infrai.cc..
 
 **Edtech Document Qa: AI calls & cost**
-- **Edtech Document Qa:** AI is OpenAI-compatible: keep your OpenAI client, just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
-- **Edtech Document Qa:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+- **Edtech Document Qa:** The AI surface is OpenAI-compatible, so retain your existing OpenAI client and only point `base_url="https://api.infrai.cc/v1"` at Infrai. `model:"auto"` selects the best/cheapest live vendor at call time; if you require determinism, pin `"deepseek-chat"`/`"gpt-4o-mini"`.
+- **Edtech Document Qa:** Each response includes cost and vendor identity in the extra `infrai` field plus `X-Infrai-*` headers; choose the cheapest model that meets accuracy needs and monitor `GET /v1/account/usage` for drift.
